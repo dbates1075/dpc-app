@@ -1,9 +1,12 @@
 package gov.cms.dpc.api.resources.v1;
 
 import ca.uhn.fhir.parser.IParser;
+import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
+import ca.uhn.fhir.rest.gclient.IOperationUntypedWithInput;
 import ca.uhn.fhir.rest.gclient.IReadExecutable;
 import ca.uhn.fhir.rest.server.exceptions.AuthenticationException;
+import ca.uhn.fhir.rest.server.exceptions.MethodNotAllowedException;
 import gov.cms.dpc.api.APITestHelpers;
 import gov.cms.dpc.api.AbstractSecureApplicationTest;
 import gov.cms.dpc.fhir.DPCIdentifierSystem;
@@ -11,6 +14,8 @@ import gov.cms.dpc.fhir.helpers.FHIRHelpers;
 import gov.cms.dpc.testing.APIAuthHelpers;
 import org.apache.commons.lang3.tuple.Pair;
 import org.hl7.fhir.dstu3.model.Bundle;
+import org.hl7.fhir.dstu3.model.Enumerations;
+import org.hl7.fhir.dstu3.model.Parameters;
 import org.hl7.fhir.dstu3.model.Patient;
 import org.junit.jupiter.api.Test;
 
@@ -18,6 +23,7 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
+import java.sql.Date;
 import java.util.UUID;
 
 import static gov.cms.dpc.api.APITestHelpers.ORGANIZATION_ID;
@@ -176,17 +182,48 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
 
         // Try to update one
         // TODO: Removed until DPC-683 is merged
-//        final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 2).getResource();
-//        patient.setBirthDate(Date.valueOf("2000-01-01"));
-//        patient.setGender(Enumerations.AdministrativeGender.MALE);
-//
-//        final MethodOutcome outcome = client
-//                .update()
-//                .resource(patient)
-//                .withId(patient.getId())
-//                .encodedJson()
-//                .execute();
-//
-//        assertTrue(((Patient) outcome.getResource()).equalsDeep(patient), "Should have been updated correctly");
+        final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 2).getResource();
+        patient.setBirthDate(Date.valueOf("2000-01-01"));
+        patient.setGender(Enumerations.AdministrativeGender.MALE);
+
+        final MethodOutcome outcome = client
+                .update()
+                .resource(patient)
+                .withId(patient.getId())
+                .encodedJson()
+                .execute();
+
+        assertTrue(((Patient) outcome.getResource()).equalsDeep(patient), "Should have been updated correctly");
+    }
+
+    @Test
+    void PatientEverything() throws IOException, URISyntaxException, NoSuchAlgorithmException {
+        final IParser parser = ctx.newJsonParser();
+        final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
+        final String macaroon = FHIRHelpers.registerOrganization(attrClient, parser, ORGANIZATION_ID, getAdminURL());
+        final String keyLabel = "patient-everything-key";
+        final Pair<UUID, PrivateKey> uuidPrivateKeyPair = APIAuthHelpers.generateAndUploadKey(keyLabel, ORGANIZATION_ID, GOLDEN_MACAROON, getBaseURL());
+        final IGenericClient client = APIAuthHelpers.buildAuthenticatedClient(ctx, getBaseURL(), macaroon, uuidPrivateKeyPair.getLeft(), uuidPrivateKeyPair.getRight());
+
+        final Bundle patients = client
+                .search()
+                .forResource(Patient.class)
+                .encodedJson()
+                .returnBundle(Bundle.class)
+                .execute();
+
+        final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 17).getResource();
+
+        // possibly not the right construction of the request, but also not allowed yet by capabilities
+        // See api.client.ClientUtils for examples of client usage
+        final IOperationUntypedWithInput<Patient> everythingRequest = client
+                .operation()
+                .onType(Patient.class)
+                .named("$everything")
+                .withNoParameters(Parameters.class)
+                .returnResourceType(Patient.class)
+                .encodedJson();
+
+        assertThrows(MethodNotAllowedException.class, everythingRequest::execute, "$everything not yet allowed");
     }
 }

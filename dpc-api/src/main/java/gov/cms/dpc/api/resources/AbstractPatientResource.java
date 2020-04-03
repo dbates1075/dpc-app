@@ -5,9 +5,7 @@ import gov.cms.dpc.fhir.annotations.Profiled;
 import gov.cms.dpc.fhir.validations.profiles.PatientProfile;
 import gov.cms.dpc.fhir.annotations.FHIR;
 import io.dropwizard.auth.Auth;
-import org.hl7.fhir.dstu3.model.Bundle;
-import org.hl7.fhir.dstu3.model.Parameters;
-import org.hl7.fhir.dstu3.model.Patient;
+import org.hl7.fhir.dstu3.model.*;
 import org.hl7.fhir.instance.model.api.IBaseOperationOutcome;
 
 import javax.validation.Valid;
@@ -36,6 +34,10 @@ public abstract class AbstractPatientResource {
     @GET
     @Path("/{patientID}")
     public abstract Patient getPatient(UUID patientID);
+
+    @GET
+    @Path("/{patientID}/$everything")
+    public abstract Resource everything(OrganizationPrincipal organization, Provenance attestation, UUID patientId);
 
     @DELETE
     @Path("/{patientID}")
