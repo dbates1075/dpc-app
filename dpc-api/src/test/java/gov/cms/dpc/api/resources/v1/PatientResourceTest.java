@@ -197,7 +197,7 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     }
 
     @Test
-    void PatientEverything() throws IOException, URISyntaxException, NoSuchAlgorithmException {
+    void testPatientEverything() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
         final String macaroon = FHIRHelpers.registerOrganization(attrClient, parser, ORGANIZATION_ID, getAdminURL());
@@ -214,16 +214,15 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
 
         final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 17).getResource();
 
-        // possibly not the right construction of the request, but also not allowed yet by capabilities
-        // See api.client.ClientUtils for examples of client usage
-        final IOperationUntypedWithInput<Patient> everythingRequest = client
+        final Bundle result = client
                 .operation()
                 .onType(Patient.class)
-                .named("$everything")
+                .named("everything")
                 .withNoParameters(Parameters.class)
-                .returnResourceType(Patient.class)
-                .encodedJson();
+                .returnResourceType(Bundle.class)
+                .encodedJson()
+                .execute();
 
-        assertThrows(MethodNotAllowedException.class, everythingRequest::execute, "$everything not yet allowed");
+        assertNotNull(result);
     }
 }

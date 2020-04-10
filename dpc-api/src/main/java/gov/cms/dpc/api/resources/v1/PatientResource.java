@@ -174,7 +174,8 @@ public class PatientResource extends AbstractPatientResource {
         final Provenance.ProvenanceAgentComponent performer = FHIRExtractors.getProvenancePerformer(provenance);
         final UUID providerId = UUID.fromString(performer.getOnBehalfOfReference().getReference());
         final UUID orgId = organization.getID();
-        return dataService.retrieveData(orgId, providerId, List.of(patientMbi), ResourceType.Patient, ResourceType.ExplanationOfBenefit, ResourceType.Coverage);
+        return dataService.retrieveData(orgId, providerId, List.of(patientMbi),
+                ResourceType.Patient, ResourceType.ExplanationOfBenefit, ResourceType.Coverage);
     }
 
     @DELETE

@@ -66,7 +66,6 @@ class FHIRSubmissionTest {
     private ResourceExtension groupResource = ResourceExtension.builder()
             .addResource(new GroupResource(queue, client, TEST_BASE_URL))
             .addResource(new JobResource(queue, TEST_BASE_URL))
-            .addResource(new PatientResource(client, null, null))
             .setTestContainerFactory(testContainer)
             .addProvider(staticFilter)
             .addProvider(new AuthValueFactoryProvider.Binder<>(OrganizationPrincipal.class))
@@ -214,21 +213,6 @@ class FHIRSubmissionTest {
         assertAll(() -> assertEquals(resources.size(), JobQueueBatch.validResourceTypes.size()));
     }
 
-    @Test
-    void testPatientEverythingRequest() {
-        final WebTarget target = groupResource.target("/Patient/1/$everything");
-        final Response response = target.request().accept(FHIR_JSON)
-                .get();
-
-        var job = queue.claimBatch(AGGREGATOR_ID);
-        assertTrue(job.isPresent());
-
-        assertAll(
-                () -> assertEquals(408, response.getStatus(), "Should have a timeout response status"),
-                () -> assertEquals(null, response.getHeaderString("Content-Location"), "Should not have content location")
-        );
-    }
-
     @SuppressWarnings("unchecked")
     private static void mockClient() {
 
@@ -240,7 +224,6 @@ class FHIRSubmissionTest {
 
         Mockito.when(client.read()).thenReturn(mockRead);
         Mockito.when(mockRead.resource(Group.class)).thenReturn(mockTypedRead);
-        Mockito.when(mockRead.resource(Patient.class)).thenReturn(mockTypedRead);
         Mockito.when(mockTypedRead.withId(Mockito.any(IdType.class))).thenReturn(mockExecutable);
         Mockito.when(mockExecutable.encodedJson()).thenReturn(mockExecutable);
         Mockito.when(mockExecutable.execute()).thenAnswer(answer -> {
