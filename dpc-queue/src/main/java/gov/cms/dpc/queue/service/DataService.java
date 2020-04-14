@@ -131,7 +131,7 @@ public class DataService {
                 .flatMap(List::stream)
                 .filter(bf -> resourceTypes.contains(bf.getResourceType()))
                 .forEach(batchFile -> {
-                    Class typeClass;
+                    Class<? extends Resource> typeClass;
                     switch(batchFile.getResourceType()) {
                         case Coverage:
                             typeClass = Coverage.class;
