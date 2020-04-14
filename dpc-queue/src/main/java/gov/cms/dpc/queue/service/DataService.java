@@ -9,10 +9,7 @@ import gov.cms.dpc.queue.exceptions.DataRetrievalException;
 import gov.cms.dpc.queue.exceptions.DataRetrievalRetryException;
 import gov.cms.dpc.queue.models.JobQueueBatch;
 import gov.cms.dpc.queue.models.JobQueueBatchFile;
-import org.hl7.fhir.dstu3.model.Bundle;
-import org.hl7.fhir.dstu3.model.OperationOutcome;
-import org.hl7.fhir.dstu3.model.Resource;
-import org.hl7.fhir.dstu3.model.ResourceType;
+import org.hl7.fhir.dstu3.model.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -134,8 +131,23 @@ public class DataService {
                 .flatMap(List::stream)
                 .filter(bf -> resourceTypes.contains(bf.getResourceType()))
                 .forEach(batchFile -> {
+                    Class typeClass;
+                    switch(batchFile.getResourceType()) {
+                        case Coverage:
+                            typeClass = Coverage.class;
+                            break;
+                        case ExplanationOfBenefit:
+                            typeClass = ExplanationOfBenefit.class;
+                            break;
+                        case Patient:
+                            typeClass = Patient.class;
+                            break;
+                        default:
+                            throw new DataRetrievalException("Unexpected resource type: " + batchFile.getResourceType());
+
+                    }
                     Path path = Paths.get(String.format("%s/%s.ndjson", exportPath, batchFile.getFileName()));
-                    addResourceEntries(Resource.class, path, bundle);
+                    addResourceEntries(typeClass, path, bundle);
                 });
 
 

@@ -151,6 +151,7 @@ public class PatientResource extends AbstractPatientResource {
                 .execute();
     }
 
+    @GET
     @FHIR
     @Path("/{patientID}/$everything")
     @PathAuthorizer(type = ResourceType.Patient, pathParam = "patientID")
@@ -166,16 +167,20 @@ public class PatientResource extends AbstractPatientResource {
             @ApiResponse(code = 500, message = "A system error occurred", response = OperationOutcome.class)
     })
     @Override
-    public Resource everything(@Auth OrganizationPrincipal organization,
+    public Bundle everything(@ApiParam(hidden = true) @Auth OrganizationPrincipal organization,
                                @Valid @Profiled(profile = AttestationProfile.PROFILE_URI) @ProvenanceHeader Provenance provenance,
                                @ApiParam(value = "Patient resource ID", required = true) @PathParam("patientID") UUID patientId) {
-        Patient patient = getPatient(patientId);
-        String patientMbi = FHIRExtractors.getPatientMBI(patient);
+        final Patient patient = getPatient(patientId);
+        final String patientMbi = FHIRExtractors.getPatientMBI(patient);
         final Provenance.ProvenanceAgentComponent performer = FHIRExtractors.getProvenancePerformer(provenance);
-        final UUID providerId = UUID.fromString(performer.getOnBehalfOfReference().getReference());
+        final UUID providerId = FHIRExtractors.getEntityUUID(performer.getOnBehalfOfReference().getReference());
         final UUID orgId = organization.getID();
-        return dataService.retrieveData(orgId, providerId, List.of(patientMbi),
+        Resource result = dataService.retrieveData(orgId, providerId, List.of(patientMbi),
                 ResourceType.Patient, ResourceType.ExplanationOfBenefit, ResourceType.Coverage);
+        if (ResourceType.Bundle.equals(result.getResourceType())) {
+            return (Bundle) result;
+        }
+        throw new WebApplicationException("System error");
     }
 
     @DELETE

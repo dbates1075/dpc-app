@@ -3,21 +3,20 @@ package gov.cms.dpc.api.resources.v1;
 import ca.uhn.fhir.parser.IParser;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
-import ca.uhn.fhir.rest.gclient.IOperationUntypedWithInput;
 import ca.uhn.fhir.rest.gclient.IReadExecutable;
 import ca.uhn.fhir.rest.server.exceptions.AuthenticationException;
-import ca.uhn.fhir.rest.server.exceptions.MethodNotAllowedException;
 import gov.cms.dpc.api.APITestHelpers;
 import gov.cms.dpc.api.AbstractSecureApplicationTest;
 import gov.cms.dpc.fhir.DPCIdentifierSystem;
+import gov.cms.dpc.fhir.FHIRExtractors;
 import gov.cms.dpc.fhir.helpers.FHIRHelpers;
 import gov.cms.dpc.testing.APIAuthHelpers;
 import org.apache.commons.lang3.tuple.Pair;
-import org.hl7.fhir.dstu3.model.Bundle;
-import org.hl7.fhir.dstu3.model.Enumerations;
-import org.hl7.fhir.dstu3.model.Parameters;
-import org.hl7.fhir.dstu3.model.Patient;
+import org.hl7.fhir.dstu3.model.*;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -29,6 +28,7 @@ import java.util.UUID;
 import static gov.cms.dpc.api.APITestHelpers.ORGANIZATION_ID;
 import static org.junit.jupiter.api.Assertions.*;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class PatientResourceTest extends AbstractSecureApplicationTest {
 
     PatientResourceTest() {
@@ -36,6 +36,7 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     }
 
     @Test
+    @Order(1)
     void ensurePatientsExist() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
@@ -113,6 +114,7 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     }
 
     @Test
+    @Order(2)
     void testPatientRemoval() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
@@ -163,6 +165,7 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     }
 
     @Test
+    @Order(3)
     void testPatientUpdating() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
@@ -197,6 +200,7 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     }
 
     @Test
+    @Order(4)
     void testPatientEverything() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
@@ -213,14 +217,22 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
                 .execute();
 
         final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 17).getResource();
+        String patientId = FHIRExtractors.getEntityUUID(patient.getId()).toString();
+
+        String provenance = "{ \"resourceType\": \"Provenance\", \"recorded\": \"" + DateTimeType.now().getValueAsString() + "\"," +
+                " \"reason\": [ { \"system\": \"http://hl7.org/fhir/v3/ActReason\", \"code\": \"TREAT\"  } ], \"agent\": [ { \"role\": " +
+                "[ { \"coding\": [ { \"system\":" + "\"http://hl7.org/fhir/v3/RoleClass\", \"code\": \"AGNT\" } ] } ], \"whoReference\": " +
+                "{ \"reference\": \"Organization/" + ORGANIZATION_ID + "\" }, \"onBehalfOfReference\": { \"reference\": " +
+                "\"Practitioner/"+ UUID.randomUUID().toString() + "\" } } ] }";
 
         final Bundle result = client
                 .operation()
-                .onType(Patient.class)
-                .named("everything")
+                .onInstance(new IdType("Patient", patientId))
+                .named("$everything")
                 .withNoParameters(Parameters.class)
                 .returnResourceType(Bundle.class)
-                .encodedJson()
+                .useHttpGet()
+                .withAdditionalHeader("X-Provenance", provenance)
                 .execute();
 
         assertNotNull(result);
