@@ -131,22 +131,8 @@ public class DataService {
                 .flatMap(List::stream)
                 .filter(bf -> resourceTypes.contains(bf.getResourceType()))
                 .forEach(batchFile -> {
-                    Class<? extends Resource> typeClass;
-                    switch(batchFile.getResourceType()) {
-                        case Coverage:
-                            typeClass = Coverage.class;
-                            break;
-                        case ExplanationOfBenefit:
-                            typeClass = ExplanationOfBenefit.class;
-                            break;
-                        case Patient:
-                            typeClass = Patient.class;
-                            break;
-                        default:
-                            throw new DataRetrievalException("Unexpected resource type: " + batchFile.getResourceType());
-
-                    }
                     Path path = Paths.get(String.format("%s/%s.ndjson", exportPath, batchFile.getFileName()));
+                    Class<? extends Resource> typeClass = getClassForResourceType(batchFile.getResourceType());
                     addResourceEntries(typeClass, path, bundle);
                 });
 
@@ -154,6 +140,19 @@ public class DataService {
         // set a bundle id here? anything else?
         bundle.setId(UUID.randomUUID().toString());
         return bundle.setTotal(bundle.getEntry().size());
+    }
+
+    private Class<? extends Resource> getClassForResourceType(ResourceType resourceType) {
+        switch(resourceType) {
+            case Coverage:
+                return Coverage.class;
+            case ExplanationOfBenefit:
+                return ExplanationOfBenefit.class;
+            case Patient:
+                return Patient.class;
+            default:
+                throw new DataRetrievalException("Unexpected resource type: " + resourceType);
+        }
     }
 
     private void addResourceEntries(Class<? extends Resource> clazz, Path path, Bundle bundle) {

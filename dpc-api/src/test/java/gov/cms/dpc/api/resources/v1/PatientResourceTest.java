@@ -23,6 +23,7 @@ import java.net.URISyntaxException;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.sql.Date;
+import java.util.List;
 import java.util.UUID;
 
 import static gov.cms.dpc.api.APITestHelpers.ORGANIZATION_ID;
@@ -236,5 +237,10 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
                 .execute();
 
         assertNotNull(result);
+        assertEquals(31, result.getTotal(), "Should have 31 entries in Bundle");
+        for (Bundle.BundleEntryComponent bec : result.getEntry()) {
+            List<ResourceType> resourceTypes = List.of(ResourceType.Coverage, ResourceType.ExplanationOfBenefit, ResourceType.Patient);
+            assertTrue(resourceTypes.contains(bec.getResource().getResourceType()), "Resource type should be Coverage, EOB, or Patient");
+        }
     }
 }
