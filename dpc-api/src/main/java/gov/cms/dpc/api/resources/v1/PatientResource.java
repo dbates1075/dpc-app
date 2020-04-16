@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static gov.cms.dpc.api.APIHelpers.bulkResourceClient;
 import static gov.cms.dpc.fhir.helpers.FHIRHelpers.handleMethodOutcome;
@@ -170,10 +171,45 @@ public class PatientResource extends AbstractPatientResource {
     public Bundle everything(@ApiParam(hidden = true) @Auth OrganizationPrincipal organization,
                                @Valid @Profiled(profile = AttestationProfile.PROFILE_URI) @ProvenanceHeader Provenance provenance,
                                @ApiParam(value = "Patient resource ID", required = true) @PathParam("patientID") UUID patientId) {
-        final Patient patient = getPatient(patientId);
-        final String patientMbi = FHIRExtractors.getPatientMBI(patient);
+
         final Provenance.ProvenanceAgentComponent performer = FHIRExtractors.getProvenancePerformer(provenance);
         final UUID providerId = FHIRExtractors.getEntityUUID(performer.getOnBehalfOfReference().getReference());
+        Practitioner provider = this.client
+                .read()
+                .resource(Practitioner.class)
+                .withId(providerId.toString())
+                .encodedJson()
+                .execute();
+
+        Bundle providerRosters = client.search()
+                .forResource(Group.class)
+                .where(Group.CHARACTERISTIC_VALUE
+                        .withLeft(Group.CHARACTERISTIC.exactly().code("attributed-to"))
+                        .withRight(Group.VALUE.exactly().systemAndCode(DPCIdentifierSystem.NPPES.getSystem(), FHIRExtractors.getProviderNPI(provider))))
+                .withTag("", organization.getID().toString())
+                .returnBundle(Bundle.class)
+                .encodedJson()
+                .execute();
+
+        if (providerRosters.getTotal() < 1) {
+            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
+        }
+
+        Group roster = (Group) providerRosters.getEntryFirstRep().getResource();
+        List<Group.GroupMemberComponent> members = roster.getMember();
+        if (members == null || members.isEmpty()) {
+            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
+        }
+
+        List<Reference> rosterMembers = roster.getMember().stream().map(Group.GroupMemberComponent::getEntity).collect(Collectors.toList());
+        List<UUID> providerPatientIds = rosterMembers.stream().map(ref -> FHIRExtractors.getEntityUUID(ref.getReference())).collect(Collectors.toList());
+        if (!providerPatientIds.contains(patientId)) {
+            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
+        }
+
+        final Patient patient = getPatient(patientId);
+        final String patientMbi = FHIRExtractors.getPatientMBI(patient);
+
         final UUID orgId = organization.getID();
         Resource result = dataService.retrieveData(orgId, providerId, List.of(patientMbi),
                 ResourceType.Patient, ResourceType.ExplanationOfBenefit, ResourceType.Coverage);

@@ -3,10 +3,14 @@ package gov.cms.dpc.api.resources.v1;
 import ca.uhn.fhir.parser.IParser;
 import ca.uhn.fhir.rest.api.MethodOutcome;
 import ca.uhn.fhir.rest.client.api.IGenericClient;
+import ca.uhn.fhir.rest.gclient.ICreateTyped;
+import ca.uhn.fhir.rest.gclient.IOperationUntyped;
+import ca.uhn.fhir.rest.gclient.IOperationUntypedWithInput;
 import ca.uhn.fhir.rest.gclient.IReadExecutable;
 import ca.uhn.fhir.rest.server.exceptions.AuthenticationException;
 import gov.cms.dpc.api.APITestHelpers;
 import gov.cms.dpc.api.AbstractSecureApplicationTest;
+import gov.cms.dpc.common.utils.SeedProcessor;
 import gov.cms.dpc.fhir.DPCIdentifierSystem;
 import gov.cms.dpc.fhir.FHIRExtractors;
 import gov.cms.dpc.fhir.helpers.FHIRHelpers;
@@ -31,6 +35,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class PatientResourceTest extends AbstractSecureApplicationTest {
+
+    public static final String PROVENANCE_FMT = "{ \"resourceType\": \"Provenance\", \"recorded\": \"" + DateTimeType.now().getValueAsString() + "\"," +
+            " \"reason\": [ { \"system\": \"http://hl7.org/fhir/v3/ActReason\", \"code\": \"TREAT\"  } ], \"agent\": [ { \"role\": " +
+            "[ { \"coding\": [ { \"system\":" + "\"http://hl7.org/fhir/v3/RoleClass\", \"code\": \"AGNT\" } ] } ], \"whoReference\": " +
+            "{ \"reference\": \"Organization/ORGANIZATION_ID\" }, \"onBehalfOfReference\": { \"reference\": " +
+            "\"Practitioner/PRACTITIONER_ID\" } } ] }";
 
     PatientResourceTest() {
         // Not used
@@ -205,10 +215,11 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
     void testPatientEverything() throws IOException, URISyntaxException, NoSuchAlgorithmException {
         final IParser parser = ctx.newJsonParser();
         final IGenericClient attrClient = APITestHelpers.buildAttributionClient(ctx);
-        final String macaroon = FHIRHelpers.registerOrganization(attrClient, parser, ORGANIZATION_ID, getAdminURL());
-        final String keyLabel = "patient-everything-key";
-        final Pair<UUID, PrivateKey> uuidPrivateKeyPair = APIAuthHelpers.generateAndUploadKey(keyLabel, ORGANIZATION_ID, GOLDEN_MACAROON, getBaseURL());
-        final IGenericClient client = APIAuthHelpers.buildAuthenticatedClient(ctx, getBaseURL(), macaroon, uuidPrivateKeyPair.getLeft(), uuidPrivateKeyPair.getRight());
+        String macaroon = FHIRHelpers.registerOrganization(attrClient, parser, ORGANIZATION_ID, getAdminURL());
+        String keyLabel = "patient-everything-key";
+        Pair<UUID, PrivateKey> uuidPrivateKeyPair = APIAuthHelpers.generateAndUploadKey(keyLabel, ORGANIZATION_ID, GOLDEN_MACAROON, getBaseURL());
+        IGenericClient client = APIAuthHelpers.buildAuthenticatedClient(ctx, getBaseURL(), macaroon, uuidPrivateKeyPair.getLeft(), uuidPrivateKeyPair.getRight(), false, true);
+        APITestHelpers.setupPractitionerTest(client, parser);
 
         final Bundle patients = client
                 .search()
@@ -216,17 +227,31 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
                 .encodedJson()
                 .returnBundle(Bundle.class)
                 .execute();
-
         final Patient patient = (Patient) patients.getEntry().get(patients.getTotal() - 17).getResource();
-        String patientId = FHIRExtractors.getEntityUUID(patient.getId()).toString();
+        final String patientId = FHIRExtractors.getEntityUUID(patient.getId()).toString();
 
-        String provenance = "{ \"resourceType\": \"Provenance\", \"recorded\": \"" + DateTimeType.now().getValueAsString() + "\"," +
-                " \"reason\": [ { \"system\": \"http://hl7.org/fhir/v3/ActReason\", \"code\": \"TREAT\"  } ], \"agent\": [ { \"role\": " +
-                "[ { \"coding\": [ { \"system\":" + "\"http://hl7.org/fhir/v3/RoleClass\", \"code\": \"AGNT\" } ] } ], \"whoReference\": " +
-                "{ \"reference\": \"Organization/" + ORGANIZATION_ID + "\" }, \"onBehalfOfReference\": { \"reference\": " +
-                "\"Practitioner/"+ UUID.randomUUID().toString() + "\" } } ] }";
+        Bundle practSearch = client
+                .search()
+                .forResource(Practitioner.class)
+                .where(Practitioner.IDENTIFIER.exactly().code("8075963174210588464"))
+                .returnBundle(Bundle.class)
+                .encodedJson()
+                .execute();
+        Practitioner foundProvider = (Practitioner) practSearch.getEntryFirstRep().getResource();
 
-        final Bundle result = client
+        Group group = SeedProcessor.createBaseAttributionGroup(FHIRExtractors.getProviderNPI(foundProvider), ORGANIZATION_ID);
+        final Reference patientRef = new Reference("Patient/" + patientId);
+        group.addMember().setEntity(patientRef);
+
+        String provenance = PROVENANCE_FMT.replaceAll("ORGANIZATION_ID", ORGANIZATION_ID).replace("PRACTITIONER_ID", foundProvider.getId());
+        client
+                .create()
+                .resource(group)
+                .withAdditionalHeader("X-Provenance", provenance)
+                .encodedJson()
+                .execute();
+
+        Bundle result = client
                 .operation()
                 .onInstance(new IdType("Patient", patientId))
                 .named("$everything")
@@ -236,11 +261,49 @@ class PatientResourceTest extends AbstractSecureApplicationTest {
                 .withAdditionalHeader("X-Provenance", provenance)
                 .execute();
 
-        assertNotNull(result);
         assertEquals(31, result.getTotal(), "Should have 31 entries in Bundle");
         for (Bundle.BundleEntryComponent bec : result.getEntry()) {
             List<ResourceType> resourceTypes = List.of(ResourceType.Coverage, ResourceType.ExplanationOfBenefit, ResourceType.Patient);
             assertTrue(resourceTypes.contains(bec.getResource().getResourceType()), "Resource type should be Coverage, EOB, or Patient");
         }
+
+        // With unattributed provider in X-Provenance
+        macaroon = FHIRHelpers.registerOrganization(attrClient, parser, OTHER_ORG_ID, getAdminURL());
+        keyLabel = "patient-everything-key-2";
+        uuidPrivateKeyPair = APIAuthHelpers.generateAndUploadKey(keyLabel, OTHER_ORG_ID, GOLDEN_MACAROON, getBaseURL());
+        client = APIAuthHelpers.buildAuthenticatedClient(ctx, getBaseURL(), macaroon, uuidPrivateKeyPair.getLeft(), uuidPrivateKeyPair.getRight());
+        APITestHelpers.setupPractitionerTest(client, parser);
+
+        Bundle practitioners = client
+                .search()
+                .forResource(Practitioner.class)
+                .where(Practitioner.IDENTIFIER.exactly().code("164333597980511237"))
+                .returnBundle(Bundle.class)
+                .encodedJson()
+                .execute();
+        Practitioner provider = (Practitioner) practitioners.getEntryFirstRep().getResource();
+
+        group = SeedProcessor.createBaseAttributionGroup(FHIRExtractors.getProviderNPI(provider), OTHER_ORG_ID);
+        final Patient otherPatient = (Patient) patients.getEntry().get(patients.getTotal() - 18).getResource();
+        Reference otherPatientRef = new Reference("Patient/" + otherPatient.getId());
+        group.addMember().setEntity(otherPatientRef);
+        provenance = PROVENANCE_FMT.replaceAll("ORGANIZATION_ID", OTHER_ORG_ID).replace("PRACTITIONER_ID", provider.getId());
+        client
+                .create()
+                .resource(group)
+                .withAdditionalHeader("X-Provenance", provenance)
+                .encodedJson()
+                .execute();
+
+        IOperationUntypedWithInput everythingOp = client
+                .operation()
+                .onInstance(new IdType("Patient", patientId))
+                .named("$everything")
+                .withNoParameters(Parameters.class)
+                .returnResourceType(Bundle.class)
+                .useHttpGet()
+                .withAdditionalHeader("X-Provenance", provenance);
+
+        assertThrows(AuthenticationException.class, everythingOp::execute);
     }
 }
