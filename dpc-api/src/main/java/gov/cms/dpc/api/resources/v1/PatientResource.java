@@ -181,34 +181,16 @@ public class PatientResource extends AbstractPatientResource {
                 .encodedJson()
                 .execute();
 
-        Bundle providerRosters = client.search()
-                .forResource(Group.class)
-                .where(Group.CHARACTERISTIC_VALUE
-                        .withLeft(Group.CHARACTERISTIC.exactly().code("attributed-to"))
-                        .withRight(Group.VALUE.exactly().systemAndCode(DPCIdentifierSystem.NPPES.getSystem(), FHIRExtractors.getProviderNPI(provider))))
-                .withTag("", organization.getID().toString())
-                .returnBundle(Bundle.class)
-                .encodedJson()
-                .execute();
-
-        if (providerRosters.getTotal() < 1) {
-            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
-        }
-
-        Group roster = (Group) providerRosters.getEntryFirstRep().getResource();
-        List<Group.GroupMemberComponent> members = roster.getMember();
-        if (members == null || members.isEmpty()) {
-            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
-        }
-
-        List<Reference> rosterMembers = roster.getMember().stream().map(Group.GroupMemberComponent::getEntity).collect(Collectors.toList());
-        List<UUID> providerPatientIds = rosterMembers.stream().map(ref -> FHIRExtractors.getEntityUUID(ref.getReference())).collect(Collectors.toList());
-        if (!providerPatientIds.contains(patientId)) {
+        if (provider == null) {
             throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
         }
 
         final Patient patient = getPatient(patientId);
         final String patientMbi = FHIRExtractors.getPatientMBI(patient);
+
+        if (!isPatientInRoster(patientId, FHIRExtractors.getProviderNPI(provider), organization.getID())) {
+            throw new WebApplicationException(HttpStatus.UNAUTHORIZED_401);
+        }
 
         final UUID orgId = organization.getID();
         Resource result = dataService.retrieveData(orgId, providerId, List.of(patientMbi),
@@ -216,7 +198,8 @@ public class PatientResource extends AbstractPatientResource {
         if (ResourceType.Bundle.equals(result.getResourceType())) {
             return (Bundle) result;
         }
-        throw new WebApplicationException("System error");
+
+        throw new WebApplicationException(HttpStatus.INTERNAL_SERVER_ERROR_500);
     }
 
     @DELETE
@@ -290,5 +273,31 @@ public class PatientResource extends AbstractPatientResource {
                 }
             }
         }
+    }
+
+    private boolean isPatientInRoster(UUID patientId, String providerNpi, UUID organizationId) {
+        Bundle providerRosters = client.search()
+                .forResource(Group.class)
+                .where(Group.CHARACTERISTIC_VALUE
+                        .withLeft(Group.CHARACTERISTIC.exactly().code("attributed-to"))
+                        .withRight(Group.VALUE.exactly().systemAndCode(DPCIdentifierSystem.NPPES.getSystem(), providerNpi)))
+                .withTag("", organizationId.toString())
+                .returnBundle(Bundle.class)
+                .encodedJson()
+                .execute();
+
+        for (Bundle.BundleEntryComponent bec : providerRosters.getEntry()) {
+            Group roster = (Group) bec.getResource();
+            List<Group.GroupMemberComponent> members = roster.getMember();
+            List<UUID> rosterPatientIds = members.stream()
+                    .map(Group.GroupMemberComponent::getEntity)
+                    .map(ref -> FHIRExtractors.getEntityUUID(ref.getReference()))
+                    .collect(Collectors.toList());
+            if (rosterPatientIds.contains(patientId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
